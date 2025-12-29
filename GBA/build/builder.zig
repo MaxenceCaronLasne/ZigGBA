@@ -34,19 +34,22 @@ fn libRoot() []const u8 {
 }
 
 pub fn addGBAStaticLibrary(b: *std.Build, lib_name: []const u8, source_file: []const u8, debug: bool) *std.Build.Step.Compile {
-    const lib = b.addStaticLibrary(.{
-        .name = lib_name,
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = source_file } },
-        .target = b.resolveTargetQuery(gba_thumb_target_query),
-        .optimize = if (debug) .Debug else .ReleaseFast,
+    const target = b.resolveTargetQuery(gba_thumb_target_query);
+    const optimize: std.builtin.OptimizeMode = if (debug) .Debug else .ReleaseFast;
+
+    const lib_module = b.createModule(.{
+        .root_source_file = b.path(source_file),
+        .target = target,
+        .optimize = optimize,
     });
 
-    lib.setLinkerScript(.{
-        .src_path = .{
-            .owner = b,
-            .sub_path = gba_linker_script,
-        },
+    const lib = b.addLibrary(.{
+        .name = lib_name,
+        .root_module = lib_module,
+        .linkage = .static,
     });
+
+    lib.setLinkerScript(b.path(gba_linker_script));
 
     return lib;
 }
@@ -68,43 +71,34 @@ pub fn addGBAExecutable(b: *std.Build, rom_name: []const u8, source_file: []cons
         break :blk gdb;
     };
 
+    const target = b.resolveTargetQuery(gba_thumb_target_query);
+    const optimize: std.builtin.OptimizeMode = if (debug) .Debug else .ReleaseFast;
+
+    const start_zig_module = b.createModule(.{
+        .root_source_file = b.path(gba_start_zig_file),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const start_zig_obj = b.addObject(.{
         .name = "gba_start",
-        .root_source_file = .{
-            .src_path = .{
-                .owner = b,
-                .sub_path = gba_start_zig_file,
-            },
-        },
-        .target = b.resolveTargetQuery(gba_thumb_target_query),
-        .optimize = if (debug) .Debug else .ReleaseFast,
+        .root_module = start_zig_module,
+    });
+
+    const exe_module = b.createModule(.{
+        .root_source_file = b.path(source_file),
+        .target = target,
+        .optimize = optimize,
     });
 
     const exe = b.addExecutable(.{
         .name = rom_name,
-        .root_source_file = .{
-            .src_path = .{
-                .owner = b,
-                .sub_path = source_file,
-            },
-        },
-        .target = b.resolveTargetQuery(gba_thumb_target_query),
-        .optimize = if (debug) .Debug else .ReleaseFast,
+        .root_module = exe_module,
     });
 
     exe.addObject(start_zig_obj);
-    exe.setLinkerScript(.{
-        .src_path = .{
-            .owner = b,
-            .sub_path = gba_linker_script,
-        },
-    });
-    exe.addAssemblyFile(.{
-        .src_path = .{
-            .owner = b,
-            .sub_path = gba_crt0_asm,
-        },
-    });
+    exe.setLinkerScript(b.path(gba_linker_script));
+    exe.addAssemblyFile(b.path(gba_crt0_asm));
     if (use_gdb) {
         b.installArtifact(exe);
     } else {
@@ -120,12 +114,7 @@ pub fn addGBAExecutable(b: *std.Build, rom_name: []const u8, source_file: []cons
 
     const gba_lib = createGBALib(b, debug);
     exe.root_module.addAnonymousImport("gba", .{
-        .root_source_file = .{
-            .src_path = .{
-                .owner = b,
-                .sub_path = gba_lib_file,
-            },
-        },
+        .root_source_file = b.path(gba_lib_file),
     });
     exe.linkLibrary(gba_lib);
 
@@ -162,14 +151,14 @@ const Mode4ConvertStep = struct {
         const self: *Mode4ConvertStep = @fieldParentPtr("step", step);
         const ImageSourceTargetList = ArrayList(ImageSourceTarget);
 
-        var full_images = ImageSourceTargetList.init(step.owner.allocator);
-        defer full_images.deinit();
+        var full_images: ImageSourceTargetList = .{};
+        defer full_images.deinit(step.owner.allocator);
 
         var node = options.progress_node.start("Converting mode4 images", 1);
         defer node.end();
 
         for (self.images) |image| {
-            try full_images.append(ImageSourceTarget{
+            try full_images.append(step.owner.allocator, ImageSourceTarget{
                 .source = self.step.owner.pathFromRoot(image.source),
                 .target = self.step.owner.pathFromRoot(image.target),
             });
