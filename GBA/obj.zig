@@ -13,8 +13,8 @@ pub const tile_ram: *volatile [2][512]Tile(.bpp_4) = @ptrFromInt(gba.mem.vram + 
 
 /// Obj and `Affine` data is interleaved but starts at the same place in memory.
 const ObjAffineData = packed union {
-    obj: *[128]Obj align(4),
-    affine: *[32]Affine align(4),
+    obj: *[128]Obj,
+    affine: *[32]Affine,
 };
 
 /// The actual location of objects in VRAM
