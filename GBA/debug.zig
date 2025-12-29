@@ -1,6 +1,5 @@
 const std = @import("std");
 const fmt = std.fmt;
-const Writer = std.io.Writer;
 const gba = @import("gba.zig");
 const bios = gba.bios;
 
@@ -39,7 +38,7 @@ const DebugStream = struct {
         return written;
     }
 
-    pub fn outStream(self: *DebugStream) Writer(*DebugStream, error{BufferTooSmall}, DebugStream.write) {
+    pub fn writer(self: *DebugStream) std.Io.GenericWriter(*DebugStream, error{BufferTooSmall}, DebugStream.write) {
         return .{ .context = self };
     }
 };
@@ -64,7 +63,8 @@ pub fn print(comptime formatString: []const u8, args: anytype) !void {
     defer bios.debugFlush();
 
     var debugStream = DebugStream.init();
-    try fmt.format(debugStream.outStream(), formatString, args);
+    const w = debugStream.writer();
+    try fmt.format(w, formatString, args);
 }
 
 pub fn write(message: []const u8) !void {
