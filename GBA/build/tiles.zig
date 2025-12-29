@@ -204,8 +204,9 @@ pub fn convertImagePath(
     zigimg.Image.ReadError ||
     std.fs.File.OpenError
 )!ConvertOutput {
-    var image = try zigimg.Image.fromFilePath(opt.allocator, image_path);
-    defer image.deinit();
+    var read_buffer: [zigimg.io.DEFAULT_BUFFER_SIZE]u8 = undefined;
+    var image = try zigimg.Image.fromFilePath(opt.allocator, image_path, &read_buffer);
+    defer image.deinit(opt.allocator);
     return convertImage(CtxT, image, opt);
 }
 
@@ -285,8 +286,8 @@ pub fn convertImage(
         }
     }
     // Encode image data
-    var data = std.ArrayList(u8).init(opt.allocator);
-    defer data.deinit();
+    var data: std.ArrayList(u8) = .{};
+    defer data.deinit(opt.allocator);
     var tile_x: u16 = 0;
     var tile_y: u16 = 0;
     var pal_index_prev: u8 = 0;
@@ -315,14 +316,14 @@ pub fn convertImage(
                         return ConvertError.UnexpectedPaletteIndex;
                     }
                     if ((pixel_x & 1) != 0) {
-                        try data.append(pal_index_prev | (pal_index << 4));
+                        try data.append(opt.allocator, pal_index_prev | (pal_index << 4));
                     }
                     else {
                         pal_index_prev = pal_index;
                     }
                 }
                 else {
-                    try data.append(pal_index);
+                    try data.append(opt.allocator, pal_index);
                 }
             }
         }
@@ -334,11 +335,11 @@ pub fn convertImage(
     }
     // Apply padding, when necessary
     if (opt.pad_fit and opt.fit != .unlimited and data.items.len < tile_limit) {
-        try data.appendNTimes(opt.pad, tile_limit - data.items.len);
+        try data.appendNTimes(opt.allocator, opt.pad, tile_limit - data.items.len);
     }
     // All done
     return ConvertOutput{
-        .data = try data.toOwnedSlice(),
+        .data = try data.toOwnedSlice(opt.allocator),
         .count = tile_count,
     };
 }

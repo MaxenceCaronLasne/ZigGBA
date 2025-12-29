@@ -8,6 +8,8 @@ const std = @import("std");
 
 pub const ImageConverterError = error{InvalidPixelData};
 
+const io_buffer_size = 4096;
+
 const GBAColor = @import("../color.zig").Color;
 
 pub const ImageSourceTarget = struct {
@@ -28,8 +30,9 @@ pub const ImageConverter = struct {
         var image_convert_list: ArrayList(ImageConvertInfo) = .{};
         defer image_convert_list.deinit(allocator);
 
+        var read_buffer: [io_buffer_size]u8 = undefined;
         for (images) |info| {
-            const image = try zigimg.Image.fromFilePath(allocator, info.source);
+            const image = try zigimg.Image.fromFilePath(allocator, info.source, &read_buffer);
             var color_it = image.iterator();
 
             while (color_it.next()) |pixel| {
@@ -48,27 +51,29 @@ pub const ImageConverter = struct {
         var palette_file = try openWriteFile(target_palette_file_path);
         defer palette_file.close();
 
-        var palette_out_stream = palette_file.writer();
+        var palette_write_buffer: [io_buffer_size]u8 = undefined;
+        var palette_out_stream = palette_file.writer(&palette_write_buffer);
 
         // Write palette file
         var palette_count: usize = 0;
         for (palette) |entry| {
             const gba_color = colorToGBAColor(entry);
-            try palette_out_stream.writeInt(u16, @bitCast(gba_color), .little);
+            try palette_out_stream.interface.writeInt(u16, @bitCast(gba_color), .little);
             palette_count += 2;
         }
 
         // Align palette file to a power of 4
         var diff = mem.alignForward(usize, palette_count, 4) - palette_count;
         for (0..diff) |_| {
-            try palette_out_stream.writeInt(u8, 0, .little);
+            try palette_out_stream.interface.writeInt(u8, 0, .little);
         }
 
         for (image_convert_list.items) |convert| {
             var image_file = try openWriteFile(convert.info.target);
             defer image_file.close();
 
-            var image_out_stream = image_file.writer();
+            var image_write_buffer: [io_buffer_size]u8 = undefined;
+            var image_out_stream = image_file.writer(&image_write_buffer);
 
             // Write image file
             var pixel_count: usize = 0;
@@ -78,12 +83,12 @@ pub const ImageConverter = struct {
             while (color_it.next()) |pixel| : (pixel_count += 1) {
                 const raw_palette_index: usize = try quantizer.getPaletteIndex(pixel.to.premultipliedAlpha());
                 const palette_index: u8 = @as(u8, @intCast(raw_palette_index));
-                try image_out_stream.writeInt(u8, palette_index, .little);
+                try image_out_stream.interface.writeInt(u8, palette_index, .little);
             }
 
             diff = mem.alignForward(usize, pixel_count, 4) - pixel_count;
             for (0..diff) |_| {
-                try image_out_stream.writeInt(u8, 0, .little);
+                try image_out_stream.interface.writeInt(u8, 0, .little);
             }
         }
     }
