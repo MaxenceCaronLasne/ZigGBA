@@ -25,8 +25,8 @@ pub const ImageConverter = struct {
             image: zigimg.Image,
         };
 
-        var image_convert_list = ArrayList(ImageConvertInfo).init(allocator);
-        defer image_convert_list.deinit();
+        var image_convert_list: ArrayList(ImageConvertInfo) = .{};
+        defer image_convert_list.deinit(allocator);
 
         for (images) |info| {
             const image = try zigimg.Image.fromFilePath(allocator, info.source);
@@ -36,7 +36,7 @@ pub const ImageConverter = struct {
                 try quantizer.addColor(pixel.to.premultipliedAlpha());
             }
 
-            try image_convert_list.append(.{
+            try image_convert_list.append(allocator, .{
                 .info = info,
                 .image = image,
             });
