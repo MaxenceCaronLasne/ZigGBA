@@ -404,7 +404,7 @@ fn call0Return1(comptime swi: SWI) swi.ReturnType() {
     asm volatile (assembly
         : [ret] "={r0}" (ret),
         :
-        : "r0"
+        : .{ .r0 = true }
     );
     return ret;
 }
@@ -414,7 +414,7 @@ inline fn call1Return0(comptime swi: SWI, r0: anytype) void {
     return asm volatile (assembly
         :
         : [r0] "{r0}" (r0),
-        : "r0"
+        : .{ .r0 = true }
     );
 }
 
@@ -424,7 +424,7 @@ fn call1Return1(comptime swi: SWI, r0: anytype) swi.ReturnType() {
     asm volatile (assembly
         : [ret] "={r0}" (ret),
         : [r0] "{r0}" (r0),
-        : "r0"
+        : .{ .r0 = true }
     );
     return ret;
 }
@@ -435,7 +435,7 @@ fn call2Return0(comptime swi: SWI, r0: anytype, r1: anytype) void {
         :
         : [r0] "{r0}" (r0),
           [r1] "{r1}" (r1),
-        : "r0", "r1"
+        : .{ .r0 = true, .r1 = true }
     );
 }
 
@@ -446,7 +446,7 @@ fn call2Return1(comptime swi: SWI, r0: anytype, r1: anytype) swi.ReturnType() {
         : [ret] "={r0}" (ret),
         : [r0] "{r0}" (r0),
           [r1] "{r1}" (r1),
-        : "r0", "r1"
+        : .{ .r0 = true, .r1 = true }
     );
     return ret;
 }
@@ -479,7 +479,7 @@ fn call3Return0(comptime swi: SWI, r0: anytype, r1: anytype, r2: anytype) void {
         : [r0] "{r0}" (r0),
           [r1] "{r1}" (r1),
           [r2] "{r2}" (r2),
-        : "r0", "r1", "r2"
+        : .{ .r0 = true, .r1 = true, .r2 = true }
     );
 }
 
@@ -491,7 +491,7 @@ fn call3Return1(comptime swi: SWI, r0: anytype, r1: anytype, r2: anytype) swi.Re
         : [r0] "{r0}" (r0),
           [r1] "{r1}" (r1),
           [r2] "{r2}" (r2),
-        : "r0", "r1", "r2"
+        : .{ .r0 = true, .r1 = true, .r2 = true }
     );
     return ret;
 }
@@ -504,6 +504,6 @@ fn call4Return0(comptime swi: SWI, r0: anytype, r1: anytype, r2: anytype, r3: an
           [r1] "{r1}" (r1),
           [r2] "{r2}" (r2),
           [r3] "{r3}" (r3),
-        : "r0", "r1", "r2", "r3"
+        : .{ .r0 = true, .r1 = true, .r2 = true, .r3 = true }
     );
 }
