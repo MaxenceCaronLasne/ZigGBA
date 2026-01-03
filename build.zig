@@ -54,6 +54,9 @@ pub fn build(b: *std.Build) void {
     //     .flags = &[_][]const u8{"-std=c99"},
     // });
 
+    // Managed OBJ allocator demo
+    _ = GBABuilder.addGBAExecutable(b, "objManaged", "examples/objManaged/objManaged.zig");
+
     // tileDemo, TODO: Use tileset, tile and palette created by the build system
     _ = GBABuilder.addGBAExecutable(b, "tileDemo", "examples/tileDemo/tileDemo.zig");
     // tileDemo.addCSourceFile(.{

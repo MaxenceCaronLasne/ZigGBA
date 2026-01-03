@@ -33,6 +33,98 @@ var sort_keys: [128]u32 = @splat(0);
 // TODO: Could make this ?u7 I think.
 var sort_ids: [128]u8 = @splat(0);
 
+// === Managed Allocator Infrastructure ===
+
+/// Metadata for each OAM slot to support managed allocation
+const ObjMetadata = struct {
+    allocated: bool = false,
+    layer: u3 = 0,              // Only valid when allocated
+    next: ?u7 = null,           // Free list (when unallocated) OR layer list (when allocated)
+};
+
+/// Allocation mode: simple (legacy) or managed (new)
+const AllocatorMode = enum { simple, managed };
+
+/// Metadata for all 128 OAM slots (~512 bytes)
+var metadata: [128]ObjMetadata = undefined;
+
+/// Head of the free list
+var free_list_head: ?u7 = null;
+
+/// Head of each layer's allocated object list
+var layer_heads: [5]?u7 = [_]?u7{null} ** 5;
+
+/// Total number of allocated objects
+var allocated_count: u8 = 0;
+
+/// Number of objects per layer (for stats/debugging)
+var layer_counts: [5]u8 = [_]u8{0} ** 5;
+
+/// Current allocation mode
+var current_mode: AllocatorMode = .simple;
+
+// === Helper Functions ===
+
+/// Calculate index from object pointer
+fn getIndexFromPointer(obj_ptr: *Obj) u7 {
+    const ptr_addr = @intFromPtr(obj_ptr);
+    const base_addr = @intFromPtr(&buffer_inner[0]);
+
+    std.debug.assert(ptr_addr >= base_addr);
+    std.debug.assert(ptr_addr < base_addr + @sizeOf(Obj) * 128);
+
+    const offset = ptr_addr - base_addr;
+    const index = offset / @sizeOf(Obj);
+
+    std.debug.assert(index < 128);
+    return @intCast(index);
+}
+
+/// Assert that we're in managed mode
+fn assertManagedMode() void {
+    if (current_mode != .managed) {
+        @panic("Must call initManaged() before using managed API");
+    }
+}
+
+/// Initialize the managed allocation system
+pub fn initManaged() void {
+    // Initialize all metadata entries
+    for (0..128) |i| {
+        metadata[i] = .{
+            .allocated = false,
+            .layer = 0,
+            .next = if (i < 127) @as(?u7, @intCast(i + 1)) else null,
+        };
+    }
+
+    // Initialize free list (all slots available)
+    free_list_head = 0;
+
+    // Initialize layer lists (all empty)
+    layer_heads = [_]?u7{null} ** 5;
+
+    // Reset counters
+    allocated_count = 0;
+    layer_counts = [_]u8{0} ** 5;
+
+    // Switch to managed mode
+    current_mode = .managed;
+}
+
+/// Get the number of allocated objects (total)
+pub fn getAllocatedCount() u8 {
+    assertManagedMode();
+    return allocated_count;
+}
+
+/// Get the number of objects in a specific layer
+pub fn getLayerCount(layer: u3) u8 {
+    assertManagedMode();
+    std.debug.assert(layer <= 4);
+    return layer_counts[layer];
+}
+
 pub fn shellSort(count: u8) void {
     var inc: u8 = 1;
     while (inc <= count) : (inc += 1)
@@ -54,6 +146,81 @@ pub fn shellSort(count: u8) void {
 pub const palette: *Color.Palette = @ptrFromInt(gba.mem.palette + 0x200);
 
 var current_attr: usize = 0;
+
+// === Managed Allocation API ===
+
+/// Allocate an object in the specified layer (0=front, 4=back)
+pub fn allocateManaged(layer: u3) !*Obj {
+    assertManagedMode();
+    std.debug.assert(layer <= 4);
+
+    // Check if free list has available slots
+    const index = free_list_head orelse return error.OutOfMemory;
+
+    // Pop from free list
+    free_list_head = metadata[index].next;
+
+    // Mark as allocated
+    metadata[index].allocated = true;
+    metadata[index].layer = layer;
+
+    // Push to layer's linked list (at head)
+    metadata[index].next = layer_heads[layer];
+    layer_heads[layer] = index;
+
+    // Update counters
+    allocated_count += 1;
+    layer_counts[layer] += 1;
+
+    // Return pointer to the object
+    return &buffer_inner[index];
+}
+
+/// Free an allocated object
+pub fn freeManaged(obj_ptr: *Obj) void {
+    assertManagedMode();
+
+    const index = getIndexFromPointer(obj_ptr);
+
+    // Prevent double-free
+    if (!metadata[index].allocated) {
+        @panic("Double-free detected: object is not allocated");
+    }
+
+    const layer = metadata[index].layer;
+
+    // Remove from layer's linked list
+    // Need to find predecessor to update its next pointer
+    if (layer_heads[layer] == index) {
+        // Object is at head of layer list
+        layer_heads[layer] = metadata[index].next;
+    } else {
+        // Scan layer list to find predecessor
+        var prev_idx = layer_heads[layer];
+        while (prev_idx) |prev| {
+            if (metadata[prev].next == index) {
+                // Found predecessor, update its next pointer
+                metadata[prev].next = metadata[index].next;
+                break;
+            }
+            prev_idx = metadata[prev].next;
+        }
+    }
+
+    // Mark as unallocated
+    metadata[index].allocated = false;
+
+    // Push to free list (at head)
+    metadata[index].next = free_list_head;
+    free_list_head = index;
+
+    // Hide the sprite in the buffer
+    buffer_inner[index].affine_mode = .hidden;
+
+    // Update counters
+    allocated_count -= 1;
+    layer_counts[layer] -= 1;
+}
 
 pub const Obj = packed struct {
     pub const GfxMode = enum(u2) {
@@ -226,6 +393,34 @@ pub const Affine = packed struct {
     }
 };
 
+/// Copy all allocated objects to OAM in layer order (managed mode)
+///
+/// Walks the per-layer linked lists and copies objects to hardware OAM
+/// in order: layer 0 (front) → layer 4 (back).
+/// Remaining OAM slots are hidden.
+///
+/// Should only be called during VBlank.
+pub fn updateManaged() void {
+    assertManagedMode();
+
+    var oam_idx: u8 = 0;
+
+    // Walk each layer's linked list in order: 0 (front) → 4 (back)
+    for (0..5) |layer| {
+        var obj_idx: ?u7 = layer_heads[layer];
+        while (obj_idx) |idx| {
+            oam.obj[oam_idx] = obj_affine_buffer.obj[idx];
+            oam_idx += 1;
+            obj_idx = metadata[idx].next;
+        }
+    }
+
+    // Hide remaining OAM slots
+    for (oam_idx..128) |i| {
+        oam.obj[i].affine_mode = .hidden;
+    }
+}
+
 // TODO: Better abstraction for this, maybe even using the `std.Allocator` API
 pub fn allocate() *Obj {
     const result = &obj_affine_buffer.obj[current_attr];
@@ -235,8 +430,17 @@ pub fn allocate() *Obj {
 
 /// Writes the object attribute buffer to OAM data.
 ///
+/// In simple mode: copies `count` objects from buffer to OAM and resets counter.
+/// In managed mode: dispatches to `updateManaged()` and ignores `count` parameter.
+///
 /// Should only be done during VBlank
 pub fn update(count: usize) void {
+    if (current_mode == .managed) {
+        updateManaged();
+        return;
+    }
+
+    // Simple mode: original behavior
     for (obj_affine_buffer.obj[0..count], oam.obj[0..count]) |buf_entry, *oam_entry| {
         oam_entry.* = buf_entry;
     }
