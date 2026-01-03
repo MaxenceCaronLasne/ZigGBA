@@ -77,4 +77,67 @@ pub fn build(b: *std.Build) void {
     //     .file = .{ .src_path = .{ .owner = b, .sub_path = "examples/objAffine/metr.c" } },
     //     .flags = &[_][]const u8{"-std=c99"},
     // });
+
+    // Test runner - manual setup for GBA target
+    const gba_target_query = blk: {
+        var target = std.Target.Query{
+            .cpu_arch = std.Target.Cpu.Arch.thumb,
+            .cpu_model = .{ .explicit = &std.Target.arm.cpu.arm7tdmi },
+            .os_tag = .freestanding,
+        };
+        target.cpu_features_add.addFeature(@intFromEnum(std.Target.arm.Feature.thumb_mode));
+        break :blk target;
+    };
+    const gba_target = b.resolveTargetQuery(gba_target_query);
+
+    // Create test module
+    const test_module = b.createModule(.{
+        .root_source_file = b.path("GBA/gba.zig"),
+        .target = gba_target,
+        .optimize = .ReleaseFast,
+    });
+
+    // Make GBA module available to test runner
+    test_module.addImport("gba", test_module);
+
+    // Create test with custom test runner
+    const test_exe = b.addTest(.{
+        .root_module = test_module,
+        .test_runner = .{
+            .path = b.path("test_runner.zig"),
+            .mode = .simple,
+        },
+    });
+
+    // Link GBA startup code
+    const start_zig_module = b.createModule(.{
+        .root_source_file = b.path("GBA/gba_start.zig"),
+        .target = gba_target,
+        .optimize = .ReleaseFast,
+    });
+    const start_zig_obj = b.addObject(.{
+        .name = "gba_start",
+        .root_module = start_zig_module,
+    });
+    test_exe.addObject(start_zig_obj);
+
+    // Apply GBA linker script and assembly
+    test_exe.setLinkerScript(b.path("GBA/gba.ld"));
+    test_exe.addAssemblyFile(b.path("GBA/gba_crt0.s"));
+
+    // Convert to .gba binary format
+    const test_objcopy = test_exe.addObjCopy(.{ .format = .bin });
+    const install_test_bin = b.addInstallBinFile(test_objcopy.getOutput(), "test.gba");
+
+    // Create test step
+    const test_step = b.step("test", "Build GBA tests");
+    test_step.dependOn(&install_test_bin.step);
+
+    // Optional: Add mGBA run command for convenience
+    const run_test = b.addSystemCommand(&.{"mgba-qt"});
+    run_test.addArg(b.getInstallPath(.bin, "test.gba"));
+    run_test.step.dependOn(&install_test_bin.step);
+
+    const run_test_step = b.step("test-run", "Build and run tests in mGBA");
+    run_test_step.dependOn(&run_test.step);
 }

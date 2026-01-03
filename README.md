@@ -24,6 +24,24 @@ zig build
 
 This will write output ROMs to `zig-out/bin/`. These are files with a `*.gba` extension which can be written to a GBA cartridge or which can run in emulators such as [mGBA](https://github.com/mgba-emu/mgba), [Mesen](https://github.com/SourMesen/Mesen2/), and [NanoBoyAdvance](https://github.com/nba-emu/NanoBoyAdvance).
 
+## Test Runner
+
+To build the test ROM:
+
+```bash
+zig build test
+```
+
+This creates `zig-out/bin/test.gba` which runs the GBA module tests and outputs results via the debug interface.
+
+To build and run tests directly in mGBA (requires `mgba-qt` to be installed):
+
+```bash
+zig build test-run
+```
+
+Test output is visible in mGBA's debug console (Tools → View Logs).
+
 ## First example running in a emulator
 
 ![First example emulator image](docs/images/FirstExampleEmulator.png)

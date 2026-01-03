@@ -111,3 +111,8 @@ pub fn initHeader(comptime game_name: []const u8, comptime game_code: []const u8
         return header;
     }
 }
+
+// Test references - these pull in tests from submodules
+test {
+    _ = math;
+}

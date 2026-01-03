@@ -130,3 +130,29 @@ pub fn degreeToGbaAngle(comptime input: i32) i32 {
 pub fn radianToGbaAngle(comptime input: f32) i32 {
     return @as(i32, @intFromFloat(input * ((1 << 16) / (std.math.tau))));
 }
+
+// ===== Test Runner Verification Tests =====
+
+test "FixedPoint basic arithmetic" {
+    const fp1 = I8_8.fromInt(5);
+    const fp2 = I8_8.fromInt(3);
+
+    // Simple assertions without std.testing
+    if (fp1.integral != 5) return error.TestFailed;
+    if (fp2.integral != 3) return error.TestFailed;
+}
+
+test "FixedPoint equality" {
+    const fp1 = I8_8.fromInt(42);
+    const fp2 = I8_8.fromInt(42);
+    const fp3 = I8_8.fromInt(43);
+
+    if (!fp1.eql(fp2)) return error.TestFailed;
+    if (fp1.eql(fp3)) return error.TestFailed;
+}
+
+test "FixedPoint scale" {
+    // Verify the scale is correct for 8.8 fixed point
+    if (I8_8.scale != 256) return error.TestFailed;
+    if (I4_12.scale != 4096) return error.TestFailed;
+}
